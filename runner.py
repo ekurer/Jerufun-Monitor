@@ -18,6 +18,12 @@ TOKEN = os.environ.get("VIEW_TOKEN", "")
 
 def loop():
     c.init_db()
+    _m = sqlite3.connect(target)
+    cols = [r[1] for r in _m.execute("pragma table_info(station_meta)")]
+    if "is_shabbat_station" not in cols:
+        _m.execute("alter table station_meta add column is_shabbat_station INTEGER DEFAULT 0")
+        _m.commit()
+    _m.close()
     while True:
         t0 = time.time()
         try:
