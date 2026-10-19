@@ -16,6 +16,27 @@ from datetime import datetime
 STATE = {"started": time.time(), "ok": 0, "errors": 0, "last_error": None, "last_ok": None}
 TOKEN = os.environ.get("VIEW_TOKEN", "")
 
+_orig_get = c.SESSION.get
+STATE["fail_log"] = []
+
+
+def _get(url, **kw):
+    kw["timeout"] = 30
+    for attempt in (1, 2):
+        t = time.time()
+        try:
+            return _orig_get(url, **kw)
+        except Exception as e:
+            msg = "%s try%d after %.1fs %s %s" % (time.strftime("%H:%M:%S"), attempt, time.time() - t, url.rsplit("/", 1)[-1][:12], type(e).__name__)
+            STATE["fail_log"] = (STATE["fail_log"] + [msg])[-10:]
+            c.log.warning("GET failed: %s", msg)
+            if attempt == 2:
+                raise
+            time.sleep(3)
+
+
+c.SESSION.get = _get
+
 
 def loop():
     c.init_db()
