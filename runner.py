@@ -255,7 +255,7 @@ class H(BaseHTTPRequestHandler):
                         group by ts order by ts""", (cutoff,)).fetchall()
                 else:
                     rows = conn.execute("""select ts, bikes_regular + bikes_electric
-                        from snapshots where station_id = ? and ts >= datetime('now', 'localtime', '-' || ? || ' hours')
+                        from snapshots where station_id = ? and ts >= ?
                         order by ts""", (sid, cutoff)).fetchall()
                 conn.close()
                 body = json.dumps(dict(points=[dict(ts=r[0], bikes=r[1] or 0) for r in rows]), ensure_ascii=False).encode()
