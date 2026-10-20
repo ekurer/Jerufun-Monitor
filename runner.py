@@ -131,7 +131,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   נתונים נאספים כל 5 דקות מה-API הציבורי של JeruFun.
   מבוסס על הפרויקט הפתוח
   <a href="https://github.com/yuvalreisner/Jerufun-Monitor" target="_blank" rel="noopener">Jerufun-Monitor</a>
-  מאת Yuval Reisner (יוול רייזנר). מפה: &copy; OpenStreetMap contributors.
+  מאת Yuval Reisner (יובל רייזנר). מפה: &copy; OpenStreetMap contributors.
 </footer>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -141,24 +141,25 @@ const qs = () => 'token=' + encodeURIComponent(TOKEN);
 let map, markers = {}, selected = null, chart, hours = 24;
 
 function color(b, status) {
-  if (status !== 'Active') return '#9e9e9e';
+  if (status === 'Disabled') return '#9e9e9e';
   if (b === 0) return '#e53935';
   if (b <= 2) return '#fdd835';
   return '#43a047';
 }
+const STATUS_HE = {Empty: 'תחנה ריקה', Full: 'תחנה מלאה', Disabled: 'תחנה מושבתת'};
 
 async function loadStations() {
   const r = await fetch('/api/stations?' + qs());
   const data = await r.json();
   document.getElementById('updated').textContent = 'עודכן: ' + data.ts;
   document.getElementById('stTotal').textContent = data.totals.bikes;
-  document.getElementById('stElec').textContent = data.totals.novatech;
+  document.getElementById('stElec').textContent = data.totals.electric;
   document.getElementById('stEmpty').textContent = data.totals.empty;
   document.getElementById('stActive').textContent = data.totals.active;
   for (const s of data.stations) {
     if (s.lat == null) continue;
     const b = s.bikes;
-    const html = '<b>' + s.name + '</b><br>אופניים: ' + b + (s.status !== 'Active' ? '<br>סטטוס: ' + s.status : '');
+    const html = '<b>' + s.name + '</b><br>אופניים: ' + b + (STATUS_HE[s.status] ? '<br>' + STATUS_HE[s.status] : '');
     if (markers[s.station_id]) {
       markers[s.station_id].setStyle({fillColor: color(b, s.status)});
       markers[s.station_id].setPopupContent(html);
@@ -231,14 +232,17 @@ class H(BaseHTTPRequestHandler):
                 rows = conn.execute("""select m.station_id, coalesce(s.name, m.station_name), s.lat, s.lng, m.status, m.bikes_total, m.novatech
                     from map_samples m left join stations s on s.station_id = m.station_id
                     where m.ts = ?""", (last_ts,)).fetchall()
-                conn.close()
                 stations = [dict(station_id=r[0], name=r[1], lat=r[2], lng=r[3], status=r[4], bikes=(r[5] or 0) + (r[6] or 0)) for r in rows]
+                live = [s for s in stations if s["status"] != "Disabled"]
+                snap_ts = conn.execute("select max(ts) from snapshots").fetchone()[0]
+                elec = conn.execute("select coalesce(sum(bikes_electric),0) from snapshots where ts = ?", (snap_ts,)).fetchone()[0]
                 totals = dict(
-                    bikes=sum(s["bikes"] for s in stations if s["status"] == "Active"),
-                    novatech=sum((r[6] or 0) for r in rows if r[4] == "Active"),
-                    empty=sum(1 for s in stations if s["status"] == "Active" and s["bikes"] == 0),
-                    active=sum(1 for s in stations if s["status"] == "Active"),
+                    bikes=sum(s["bikes"] for s in live),
+                    electric=elec,
+                    empty=sum(1 for s in live if s["bikes"] == 0),
+                    active=len(live),
                 )
+                conn.close()
                 body = json.dumps(dict(ts=last_ts, stations=stations, totals=totals), ensure_ascii=False).encode()
                 ctype = "application/json"
             elif path == "/api/history":
