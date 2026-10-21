@@ -39,6 +39,49 @@ def _get(url, **kw):
 c.SESSION.get = _get
 
 
+
+def migrate_delta(conn):
+    """One-time migration: map_samples -> map_events (delta + daily anchor) + map_current. Transactional."""
+    conn.execute("""create table if not exists map_events (
+        ts TEXT NOT NULL, station_id TEXT NOT NULL, bikes_total INTEGER, novatech INTEGER, status TEXT, anchor INTEGER DEFAULT 0)""")
+    conn.execute("create index if not exists idx_events_sid_ts on map_events(station_id, ts)")
+    conn.execute("""create table if not exists map_current (
+        station_id TEXT PRIMARY KEY, ts TEXT, bikes_total INTEGER, novatech INTEGER, status TEXT)""")
+    conn.commit()
+    has_samples = conn.execute("select count(*) from sqlite_master where type='table' and name='map_samples'").fetchone()[0]
+    if not has_samples:
+        return
+    if conn.execute("select count(*) from map_events").fetchone()[0] > 0 and conn.execute("select count(*) from map_current").fetchone()[0] > 0:
+        conn.execute("begin")
+        conn.execute("drop table map_samples")
+        conn.execute("drop index if exists idx_map_ts")
+        conn.commit()
+        conn.execute("vacuum")
+        return
+    c.log.info("migrating map_samples -> map_events ...")
+    t0 = time.time()
+    cur, anchor_day, anchor_ts, buf = {}, None, None, []
+    for ts, sid, status, bikes, nova in conn.execute(
+            "select ts, station_id, status, bikes_total, novatech from map_samples order by ts, station_id"):
+        new = (bikes or 0, nova or 0, status or "")
+        if ts[:10] != anchor_day:
+            anchor_day, anchor_ts = ts[:10], ts
+        if ts == anchor_ts or cur.get(sid) is None or cur[sid] != new:
+            buf.append((ts, sid, new[0], new[1], new[2], 1 if ts == anchor_ts else 0))
+            cur[sid] = new
+    last_ts = conn.execute("select max(ts) from map_samples").fetchone()[0]
+    conn.execute("begin")
+    conn.executemany("insert into map_events values (?,?,?,?,?,?)", buf)
+    conn.executemany("insert or replace into map_current values (?,?,?,?,?)",
+        [(r[1], r[0], r[3] or 0, r[4] or 0, r[2] or "") for r in conn.execute(
+            "select ts, station_id, status, bikes_total, novatech from map_samples where ts=?", (last_ts,))])
+    conn.execute("drop table map_samples")
+    conn.execute("drop index if exists idx_map_ts")
+    conn.commit()
+    conn.execute("vacuum")
+    c.log.info("migration done: %d events in %.1fs", len(buf), time.time() - t0)
+
+
 def loop():
     c.init_db()
     _m = sqlite3.connect(target)
@@ -46,11 +89,10 @@ def loop():
     if "is_shabbat_station" not in cols:
         _m.execute("alter table station_meta add column is_shabbat_station INTEGER DEFAULT 0")
         _m.commit()
-    _m.execute("create table if not exists map_samples (ts DATETIME NOT NULL, station_id TEXT NOT NULL, station_name TEXT, status TEXT, bikes_total INTEGER, novatech INTEGER)")
-    _m.execute("create index if not exists idx_map_ts on map_samples(ts, station_id)")
     _m.execute("""create table if not exists stations (
         station_id TEXT PRIMARY KEY, name TEXT, lat REAL, lng REAL, status TEXT)""")
     _m.commit()
+    migrate_delta(_m)
     _m.close()
     last_detail = 0.0
     while True:
@@ -59,7 +101,17 @@ def loop():
             ts = datetime.now(c.IL_TZ).strftime("%Y-%m-%d %H:%M:%S")
             stations = c.fetch_map()
             conn = sqlite3.connect(target)
-            conn.executemany("insert into map_samples values (?,?,?,?,?,?)", [(ts, x["id"], x.get("name", ""), x.get("status", ""), x.get("omniBikes", 0), x.get("novatechBikes", 0)) for x in stations])
+            cur = {r[0]: (r[1], r[2], r[3]) for r in conn.execute("select station_id, bikes_total, novatech, status from map_current")}
+            anchor_needed = conn.execute("select count(*) from map_events where anchor=1 and substr(ts,1,10)=?", (ts[:10],)).fetchone()[0] == 0
+            ev_rows, mc_rows = [], []
+            for x in stations:
+                new = (x.get("omniBikes", 0), x.get("novatechBikes", 0), x.get("status", ""))
+                if anchor_needed or cur.get(x["id"]) != new:
+                    ev_rows.append((ts, x["id"], new[0], new[1], new[2], 1 if anchor_needed else 0))
+                mc_rows.append((x["id"], ts, new[0], new[1], new[2]))
+            if ev_rows:
+                conn.executemany("insert into map_events values (?,?,?,?,?,?)", ev_rows)
+            conn.executemany("insert or replace into map_current values (?,?,?,?,?)", mc_rows)
             conn.executemany("""insert into stations (station_id, name, lat, lng, status) values (?,?,?,?,?)
                 on conflict(station_id) do update set name=excluded.name, lat=excluded.lat, lng=excluded.lng, status=excluded.status""",
                 [(x["id"], x.get("name", ""), (x.get("location") or {}).get("lat"), (x.get("location") or {}).get("lng"), x.get("status", "")) for x in stations])
@@ -220,17 +272,18 @@ class H(BaseHTTPRequestHandler):
             if path == "/health":
                 conn = sqlite3.connect(target)
                 n, s, last = conn.execute("select count(*), count(distinct ts), max(ts) from snapshots").fetchone()
+                ev = conn.execute("select count(*) from map_events").fetchone()[0]
                 conn.close()
-                body = json.dumps(dict(STATE, rows=n, samples=s, last_ts=last, interval=os.environ.get("INTERVAL_SECONDS", "600")), ensure_ascii=False).encode()
+                body = json.dumps(dict(STATE, rows=n, samples=s, last_ts=last, events=ev, interval=os.environ.get("INTERVAL_SECONDS", "600")), ensure_ascii=False).encode()
                 ctype = "application/json"
             elif path == "/db":
                 body = open(target, "rb").read()
                 ctype = "application/octet-stream"
             elif path == "/api/stations":
                 conn = sqlite3.connect(target)
-                last_ts = conn.execute("select max(ts) from map_samples").fetchone()[0]
-                rows = conn.execute("""select m.station_id, coalesce(s.name, m.station_name), s.lat, s.lng, m.status, m.bikes_total, m.novatech
-                    from map_samples m left join stations s on s.station_id = m.station_id
+                last_ts = conn.execute("select max(ts) from map_current").fetchone()[0]
+                rows = conn.execute("""select m.station_id, coalesce(s.name, ''), s.lat, s.lng, m.status, m.bikes_total, m.novatech
+                    from map_current m left join stations s on s.station_id = m.station_id
                     where m.ts = ?""", (last_ts,)).fetchall()
                 stations = [dict(station_id=r[0], name=r[1], lat=r[2], lng=r[3], status=r[4], bikes=(r[5] or 0) + (r[6] or 0)) for r in rows]
                 live = [s for s in stations if s["status"] != "Disabled"]
