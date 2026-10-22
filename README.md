@@ -11,3 +11,5 @@ All core collection logic (collector.py, config.py, db.py) comes from that repos
 This fork adds `runner.py` (Railway runner with retries, a health endpoint,
 a raw DB download, and a live Hebrew dashboard at `/dashboard` showing the
 station map and fill-over-time graphs).
+
+Map samples are stored as change events (plus one daily anchor) in `map_events`, with the latest state in `map_current`, to keep the database small.
