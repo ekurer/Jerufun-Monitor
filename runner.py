@@ -91,6 +91,7 @@ def loop():
         _m.commit()
     _m.execute("""create table if not exists stations (
         station_id TEXT PRIMARY KEY, name TEXT, lat REAL, lng REAL, status TEXT)""")
+    _m.execute("create index if not exists idx_events_ts on map_events(ts)")
     _m.commit()
     migrate_delta(_m)
     _m.close()
@@ -154,6 +155,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .rangeBtns button.on { background: #1a73e8; color: #fff; border-color: #1a73e8; }
   footer { padding: 10px 16px; font-size: 12px; color: #666; }
   footer a { color: #1a73e8; }
+  #feed { background: #fff; padding: 12px 16px; border-top: 1px solid #e0e0e0; }
+  #feed h2 { font-size: 15px; margin: 0 0 4px; }
+  #feed .note { font-size: 12px; color: #777; margin-bottom: 8px; }
+  #feedRows { max-height: 300px; overflow-y: auto; }
+  #feed .row { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; align-items: baseline; }
+  #feed .row:last-child { border-bottom: none; }
+  #feed .row .t { color: #666; min-width: 44px; font-variant-numeric: tabular-nums; }
+  #feed .row .s { flex: 1; }
+  #feed .row .d { font-weight: 600; min-width: 38px; text-align: left; direction: ltr; }
+  #feed .d.plus { color: #2e7d32; }
+  #feed .d.minus { color: #c62828; }
+  #feed .empty { color: #666; font-size: 14px; padding: 8px 0; }
   #loading { padding: 20px; text-align: center; color: #666; }
 </style>
 </head>
@@ -169,9 +182,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div><b id="stActive">-</b>תחנות פעילות</div>
 </div>
 <div id="map"></div>
+<div id="feed">
+  <h2>נסיעות בשעה האחרונה<span>*</span></h2>
+  <div class="note">* משוערות לפי שינויי מלאי בתחנות, לא נסיעות מתועדות. ייתכן שמדובר בשינוי של המפעיל (פיזור מחדש של אופניים).</div>
+  <div id="feedRows"></div>
+</div>
 <div id="panel">
   <h2 id="chartTitle">כלל הרשת - אופניים זמינים לאורך זמן</h2>
   <div class="rangeBtns">
+    <button data-h="6">6 שעות</button>
     <button data-h="24" class="on">24 שעות</button>
     <button data-h="72">3 ימים</button>
     <button data-h="168">שבוע</button>
@@ -180,7 +199,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 <div id="loading" style="display:none">טוען...</div>
 <footer>
-  נתונים נאספים כל 5 דקות מה-API הציבורי של JeruFun.
+  נתונים נאספים כל דקה מה-API הציבורי של JeruFun.
   מבוסס על הפרויקט הפתוח
   <a href="https://github.com/yuvalreisner/Jerufun-Monitor" target="_blank" rel="noopener">Jerufun-Monitor</a>
   מאת Yuval Reisner (יובל רייזנר). מפה: &copy; OpenStreetMap contributors.
@@ -241,6 +260,21 @@ async function loadChart() {
   });
 }
 
+async function loadFeed() {
+  const r = await fetch('/api/events?hours=1&' + qs());
+  const data = await r.json();
+  const el = document.getElementById('feedRows');
+  if (!data.events.length) {
+    el.innerHTML = '<div class="empty">לא נצפו שינויים בשעה האחרונה</div>';
+    return;
+  }
+  el.innerHTML = data.events.map(e => {
+    const d = e.delta > 0 ? '+' + e.delta : '\u2212' + (-e.delta);
+    const cls = e.delta > 0 ? 'plus' : 'minus';
+    return '<div class="row"><span class="t">' + e.ts.slice(11, 16) + '</span><span class="s">' + e.station + '</span><span class="d ' + cls + '">' + d + '</span></div>';
+  }).join('');
+}
+
 document.querySelectorAll('.rangeBtns button').forEach(btn => btn.onclick = () => {
   document.querySelectorAll('.rangeBtns button').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
@@ -250,8 +284,8 @@ document.querySelectorAll('.rangeBtns button').forEach(btn => btn.onclick = () =
 
 map = L.map('map').setView([31.78, 35.21], 13);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(map);
-loadStations(); loadChart();
-setInterval(loadStations, 120000);
+loadStations(); loadChart(); loadFeed();
+setInterval(() => { loadStations(); loadFeed(); }, 120000);
 </script>
 </body>
 </html>
@@ -297,6 +331,32 @@ class H(BaseHTTPRequestHandler):
                 )
                 conn.close()
                 body = json.dumps(dict(ts=last_ts, stations=stations, totals=totals), ensure_ascii=False).encode()
+                ctype = "application/json"
+            elif path == "/api/events":
+                try:
+                    ev_hours = max(1, min(24, int(q.get("hours", ["1"])[0])))
+                except ValueError:
+                    ev_hours = 1
+                cutoff = (datetime.now(c.IL_TZ) - timedelta(hours=ev_hours)).strftime("%Y-%m-%d %H:%M:%S")
+                conn = sqlite3.connect(target)
+                names = dict(conn.execute("select station_id, name from stations").fetchall())
+                prev = {}
+                for sid in names:
+                    r = conn.execute("select bikes_total, novatech from map_events where station_id = ? and ts < ? order by ts desc limit 1", (sid, cutoff)).fetchone()
+                    if r:
+                        prev[sid] = (r[0] or 0) + (r[1] or 0)
+                ev_rows = conn.execute("select ts, station_id, bikes_total, novatech from map_events where ts >= ? order by ts, station_id", (cutoff,)).fetchall()
+                conn.close()
+                events = []
+                for ets, sid, bikes, nova in ev_rows:
+                    total = (bikes or 0) + (nova or 0)
+                    if sid in prev:
+                        d = total - prev[sid]
+                        if d != 0:
+                            events.append(dict(ts=ets, station=names.get(sid, sid), delta=d, bikes=total))
+                    prev[sid] = total
+                events.reverse()
+                body = json.dumps(dict(events=events), ensure_ascii=False).encode()
                 ctype = "application/json"
             elif path == "/api/history":
                 sid = q.get("station", ["all"])[0]
