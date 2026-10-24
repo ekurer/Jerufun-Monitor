@@ -13,6 +13,7 @@ if not os.path.islink(link):
 
 import collector as c
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 STATE = {"started": time.time(), "ok": 0, "errors": 0, "last_error": None, "last_ok": None}
 TOKEN = os.environ.get("VIEW_TOKEN", "")
@@ -154,8 +155,8 @@ def compute_events(conn, names, ev_hours, now_dt):
         if epoch is None:
             # Do not guess the fold of an ambiguous historical wall time.
             naive = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-            first = naive.replace(tzinfo=c.IL_TZ, fold=0)
-            second = naive.replace(tzinfo=c.IL_TZ, fold=1)
+            first = naive.replace(tzinfo=ZoneInfo("Asia/Jerusalem"), fold=0)
+            second = naive.replace(tzinfo=ZoneInfo("Asia/Jerusalem"), fold=1)
             if first.utcoffset() == second.utcoffset():
                 epoch = first.timestamp()
         if epoch is not None and start_epoch <= epoch <= now_epoch and sid in prev:
