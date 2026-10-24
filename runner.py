@@ -209,6 +209,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <header>
   <h1>JeruFun ירושלים - מוניטור תחנות אופניים</h1>
   <span class="sub" id="updated"></span>
+  <a id="reportLink" href="/report" style="color:#fff; font-size:13px">דוח עלות ויעילות</a>
 </header>
 <div id="stats">
   <div><b id="stTotal">-</b>אופניים זמינים</div>
@@ -244,6 +245,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const qs = () => 'token=' + encodeURIComponent(TOKEN);
+document.getElementById('reportLink').href = '/report?' + qs();
 let map, markers = {}, selected = null, chart, hours = 24;
 
 function color(b, status) {
@@ -327,6 +329,104 @@ setInterval(() => { loadStations(); loadFeed(); }, 120000);
 """
 
 
+REPORT_HTML = """<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JeruFun - דוח עלות ויעילות</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+  header { background: #1a73e8; color: #fff; padding: 10px 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { font-size: 13px; opacity: .9; }
+  header a { color: #fff; font-size: 13px; }
+  main { max-width: 640px; margin: 0 auto; }
+  .card { background: #fff; margin: 12px; padding: 14px 16px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .verdict { border-right: 4px solid #1a73e8; }
+  .verdict .big { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .verdict .why { font-size: 14px; color: #444; line-height: 1.5; }
+  #stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px; }
+  #stats .stat { flex: 1 1 140px; background: #fff; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.06); padding: 10px 12px; font-size: 13px; color: #555; }
+  #stats .stat b { display: block; font-size: 20px; color: #1a73e8; direction: ltr; text-align: right; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .rows .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; align-items: baseline; }
+  .rows .row:last-child { border-bottom: none; }
+  .rows .row .l { flex: 1; color: #444; }
+  .rows .row .v { font-weight: 600; text-align: left; white-space: nowrap; }
+  .bar { height: 10px; border-radius: 5px; background: #e8f0fe; overflow: hidden; margin: 6px 0 4px; }
+  .bar .fill { height: 100%; background: #1a73e8; }
+  .barNote { font-size: 12px; color: #777; margin-bottom: 10px; }
+  ol { margin: 0; padding-right: 20px; font-size: 14px; line-height: 1.6; color: #333; }
+  ol li { margin-bottom: 8px; }
+  footer { padding: 10px 16px; font-size: 12px; color: #666; max-width: 640px; margin: 0 auto; }
+  footer a { color: #1a73e8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>דוח עלות ויעילות - דגימה כל דקה</h1>
+  <span class="sub">נמדד ב-24 באוקטובר 2026</span>
+  <a id="mapLink" href="/dashboard">למפה החיה</a>
+</header>
+<main>
+<div class="card verdict">
+  <div class="big">שורה תחתונה: נשארים על דגימה כל דקה.</div>
+  <div class="why">הדגימה עצמה כמעט לא עולה כסף - רוב העלות היא הזיכרון של השירות, לא כמות הקריאות. ודווקא הדגימה התכופה היא מה שנותן את דיוק הדקה שהפרויקט הוקם בשבילו.</div>
+</div>
+<div id="stats">
+  <div class="stat"><b>~$1.10</b>עלות השירות לחודש</div>
+  <div class="stat"><b>~$0.0004</b>עלות הדגימה לחודש</div>
+  <div class="stat"><b>20%</b>מהאירועים היו הולכים לאיבוד בדגימה כל 5 דקות</div>
+  <div class="stat"><b>0</b>שגיאות באיסוף, 123/123 תחנות</div>
+</div>
+<div class="card">
+  <h2>כמה זה עולה</h2>
+  <div class="bar"><div class="fill" style="width:90%"></div></div>
+  <div class="barNote">כ-90% מהעלות היא זיכרון (השירות תופס כ-100MB כל הזמן), לא הדגימה.</div>
+  <div class="rows">
+    <div class="row"><span class="l">עלות השירות עד היום (6 ימים)</span><span class="v">$0.21</span></div>
+    <div class="row"><span class="l">עלות ליום / לחודש</span><span class="v">~$0.037 / ~$1.10</span></div>
+    <div class="row"><span class="l">ההפרש בין דגימה כל דקה לכל 5 דקות</span><span class="v">שבריר סנט בחודש</span></div>
+    <div class="row"><span class="l">אחסון</span><span class="v">זניח (0.3MB)</span></div>
+    <div class="row"><span class="l">חשבון Railway הכולל לתקופה (צפי)</span><span class="v">$9.75</span></div>
+  </div>
+  <div class="barNote">הצפי כולל $5 דמי מנוי; $3.22 מתוכם צבור שירות ישן שעצרנו ב-22.10.</div>
+</div>
+<div class="card">
+  <h2>למה דווקא כל דקה</h2>
+  <div class="rows">
+    <div class="row"><span class="l">דגימה כל 5 דקות הייתה מפספסת</span><span class="v">20% מהאירועים</span></div>
+    <div class="row"><span class="l">בשעות השיא (בוקר, צהריים, ערב מאוחר)</span><span class="v">36-40%</span></div>
+    <div class="row"><span class="l">נסיעות קצרות של עד 5 דקות (השאלה+החזרה)</span><span class="v">כ-15% מהאירועים</span></div>
+    <div class="row"><span class="l">יציבות האיסוף</span><span class="v">בלי פערים, בלי חסימות</span></div>
+  </div>
+  <div class="barNote">נסיעות קצרות לא נראות בכלל בדגימה גסה. נמדד על 1,375 אירועי שינוי ב-4 ימים.</div>
+</div>
+<div class="card">
+  <h2>מה הלאה</h2>
+  <ol>
+    <li>מעבר ל-Oracle (חינם) - מחכה להשלמת הרישום, ומוריד את עלות הזיכרון שהיא כמעט כל החשבון.</li>
+    <li>טבלת הפירוט גדלה כ-3MB ליום (בערך סנט לחודש) - אפשר לכווץ אותה באותה שיטת דלתא כשתרצה.</li>
+    <li>הפיד של נסיעות השעה האחרונה רץ על אותם נתונים בלי עלות נוספת (אחסון תחום ~16KB), ומיפוי השעון ל-UTC אומת בפרודקשן לקראת מעבר שעון החורף.</li>
+  </ol>
+</div>
+</main>
+<footer>
+  המספרים נמדדו ב-Railway ב-24 באוקטובר 2026, 17:30.
+  מבוסס על הפרויקט הפתוח
+  <a href="https://github.com/yuvalreisner/Jerufun-Monitor" target="_blank" rel="noopener">Jerufun-Monitor</a>
+  מאת Yuval Reisner (יובל רייזנר).
+</footer>
+<script>
+var t = new URLSearchParams(location.search).get('token') || '';
+if (t) document.getElementById('mapLink').href = '/dashboard?token=' + encodeURIComponent(t);
+</script>
+</body>
+</html>
+"""
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -399,6 +499,9 @@ class H(BaseHTTPRequestHandler):
                 ctype = "application/json"
             elif path in ("/", "/dashboard"):
                 body = DASHBOARD_HTML.encode()
+                ctype = "text/html; charset=utf-8"
+            elif path == "/report":
+                body = REPORT_HTML.encode()
                 ctype = "text/html; charset=utf-8"
         self.send_response(200)
         self.send_header("Content-Type", ctype)
