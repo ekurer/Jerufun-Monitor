@@ -99,7 +99,8 @@ def loop():
     while True:
         t0 = time.time()
         try:
-            ts = datetime.now(c.IL_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            observed_at = datetime.now(c.IL_TZ)
+            ts = observed_at.strftime("%Y-%m-%d %H:%M:%S")
             stations = c.fetch_map()
             conn = sqlite3.connect(target)
             cur = {r[0]: (r[1], r[2], r[3]) for r in conn.execute("select station_id, bikes_total, novatech, status from map_current")}
@@ -111,11 +112,17 @@ def loop():
                     ev_rows.append((ts, x["id"], new[0], new[1], new[2], 1 if anchor_needed else 0))
                 mc_rows.append((x["id"], ts, new[0], new[1], new[2]))
             if ev_rows:
-                conn.executemany("insert into map_events values (?,?,?,?,?,?)", ev_rows)
+                for event in ev_rows:
+                    inserted = conn.execute("insert into map_events values (?,?,?,?,?,?)", event)
+                    conn.execute("insert into feed_event_times (event_rowid, epoch) values (?,?)",
+                        (inserted.lastrowid, observed_at.timestamp()))
             conn.executemany("insert or replace into map_current values (?,?,?,?,?)", mc_rows)
             conn.executemany("""insert into stations (station_id, name, lat, lng, status) values (?,?,?,?,?)
                 on conflict(station_id) do update set name=excluded.name, lat=excluded.lat, lng=excluded.lng, status=excluded.status""",
                 [(x["id"], x.get("name", ""), (x.get("location") or {}).get("lat"), (x.get("location") or {}).get("lng"), x.get("status", "")) for x in stations])
+            # Feed windows are at most 24h. Bound UTC metadata to 48h.
+            conn.execute("delete from feed_event_times where epoch < ? or event_rowid not in (select rowid from map_events)",
+                (observed_at.timestamp() - 48 * 3600,))
             conn.commit()
             conn.close()
             STATE["map_ok"] = STATE.get("map_ok", 0) + 1
@@ -131,6 +138,33 @@ def loop():
             c.log.error("collection failed: %s", e)
         iv = int(os.environ.get("INTERVAL_SECONDS", "600"))
         time.sleep(max(1, iv - (time.time() - t0)) + random.uniform(0, 5))
+
+
+def compute_events(conn, names, ev_hours, now_dt):
+    """Use actual UTC observation times and insertion-order station baselines."""
+    now_epoch = now_dt.timestamp()
+    start_epoch = now_epoch - ev_hours * 3600
+    prev, events = {}, []
+    rows = conn.execute("""select e.ts, e.station_id, e.bikes_total,
+        e.novatech, t.epoch from map_events e
+        left join feed_event_times t on t.event_rowid = e.rowid
+        order by e.rowid""")
+    for ts, sid, bikes, nova, epoch in rows:
+        total = (bikes or 0) + (nova or 0)
+        if epoch is None:
+            # Do not guess the fold of an ambiguous historical wall time.
+            naive = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            first = naive.replace(tzinfo=c.IL_TZ, fold=0)
+            second = naive.replace(tzinfo=c.IL_TZ, fold=1)
+            if first.utcoffset() == second.utcoffset():
+                epoch = first.timestamp()
+        if epoch is not None and start_epoch <= epoch <= now_epoch and sid in prev:
+            delta = total - prev[sid]
+            if delta:
+                events.append(dict(ts=ts, station=names.get(sid, sid), delta=delta, bikes=total))
+        prev[sid] = total
+    events.reverse()
+    return events
 
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -337,25 +371,10 @@ class H(BaseHTTPRequestHandler):
                     ev_hours = max(1, min(24, int(q.get("hours", ["1"])[0])))
                 except ValueError:
                     ev_hours = 1
-                cutoff = (datetime.now(c.IL_TZ) - timedelta(hours=ev_hours)).strftime("%Y-%m-%d %H:%M:%S")
                 conn = sqlite3.connect(target)
                 names = dict(conn.execute("select station_id, name from stations").fetchall())
-                prev = {}
-                for sid in names:
-                    r = conn.execute("select bikes_total, novatech from map_events where station_id = ? and ts < ? order by ts desc limit 1", (sid, cutoff)).fetchone()
-                    if r:
-                        prev[sid] = (r[0] or 0) + (r[1] or 0)
-                ev_rows = conn.execute("select ts, station_id, bikes_total, novatech from map_events where ts >= ? order by ts, station_id", (cutoff,)).fetchall()
+                events = compute_events(conn, names, ev_hours, datetime.now(c.IL_TZ))
                 conn.close()
-                events = []
-                for ets, sid, bikes, nova in ev_rows:
-                    total = (bikes or 0) + (nova or 0)
-                    if sid in prev:
-                        d = total - prev[sid]
-                        if d != 0:
-                            events.append(dict(ts=ets, station=names.get(sid, sid), delta=d, bikes=total))
-                    prev[sid] = total
-                events.reverse()
                 body = json.dumps(dict(events=events), ensure_ascii=False).encode()
                 ctype = "application/json"
             elif path == "/api/history":
@@ -386,6 +405,11 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+
+# Feed-only metadata for new events. Existing history is not rewritten.
+with sqlite3.connect(target) as feed_conn:
+    feed_conn.execute("""create table if not exists feed_event_times (
+        event_rowid INTEGER PRIMARY KEY, epoch REAL NOT NULL)""")
 
 threading.Thread(target=loop, daemon=True).start()
 HTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), H).serve_forever()
