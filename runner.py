@@ -175,56 +175,97 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JeruFun - מוניטור אופניים בירושלים</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
 <style>
-  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
-  header { background: #1a73e8; color: #fff; padding: 10px 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .sub { font-size: 13px; opacity: .9; }
-  #stats { display: flex; gap: 16px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap; font-size: 14px; }
-  #stats b { font-size: 18px; display: block; }
-  #map { height: 52vh; min-height: 320px; }
-  #panel { background: #fff; padding: 12px 16px; }
-  #panel h2 { font-size: 15px; margin: 0 0 8px; }
-  #chartWrap { height: 260px; }
-  .rangeBtns button { margin-left: 6px; padding: 3px 10px; border: 1px solid #ccc; background: #fff; border-radius: 4px; cursor: pointer; font-size: 13px; }
-  .rangeBtns button.on { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-  footer { padding: 10px 16px; font-size: 12px; color: #666; }
-  footer a { color: #1a73e8; }
-  #feed { background: #fff; padding: 12px 16px; border-top: 1px solid #e0e0e0; }
-  #feed h2 { font-size: 15px; margin: 0 0 4px; }
-  #feed .note { font-size: 12px; color: #777; margin-bottom: 8px; }
-  #feedRows { max-height: 300px; overflow-y: auto; }
-  #feed .row { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; align-items: baseline; }
-  #feed .row:last-child { border-bottom: none; }
-  #feed .row .t { color: #666; min-width: 44px; font-variant-numeric: tabular-nums; }
-  #feed .row .s { flex: 1; }
-  #feed .row .d { font-weight: 600; min-width: 38px; text-align: left; direction: ltr; }
-  #feed .d.plus { color: #2e7d32; }
-  #feed .d.minus { color: #c62828; }
-  #feed .empty { color: #666; font-size: 14px; padding: 8px 0; }
-  #loading { padding: 20px; text-align: center; color: #666; }
+  :root {
+    --blue: #1a73e8; --blue-dark: #1256b0;
+    --bg: #f2f4f7; --ink: #1c2430; --muted: #667085;
+    --green: #2e7d32; --red: #c62828; --amber: #b26a00;
+    --radius: 14px;
+    --shadow: 0 1px 3px rgba(16,24,40,.08);
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Heebo", -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+  header { background: linear-gradient(135deg, var(--blue), var(--blue-dark)); color: #fff; padding: 12px 16px 10px; }
+  .hrow { display: flex; align-items: center; gap: 10px; max-width: 960px; margin: 0 auto; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; flex: 1; }
+  .pill { background: rgba(255,255,255,.18); color: #fff; font-size: 12.5px; font-weight: 500; padding: 5px 12px; border-radius: 999px; text-decoration: none; white-space: nowrap; }
+  .hsub { display: flex; align-items: center; gap: 6px; max-width: 960px; margin: 6px auto 0; font-size: 12.5px; opacity: .92; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #7dffa9; box-shadow: 0 0 0 3px rgba(125,255,169,.25); flex: none; }
+  main { max-width: 960px; margin: 0 auto; padding: 12px 12px 0; }
+  #stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  .stat { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 4px; text-align: center; }
+  .stat b { display: block; font-size: 20px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 11.5px; color: var(--muted); }
+  .stat.blue b { color: var(--blue); }
+  .stat.amber b { color: var(--amber); }
+  .stat.red b { color: var(--red); }
+  .stat.green b { color: var(--green); }
+  .mapWrap { position: relative; overflow: hidden; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 12px; background: #fff; }
+  #map { height: 46vh; min-height: 300px; }
+  .legend { position: absolute; bottom: 12px; inset-inline-start: 12px; z-index: 800; background: rgba(255,255,255,.93); border-radius: 10px; box-shadow: var(--shadow); padding: 7px 10px; font-size: 11.5px; color: #333; line-height: 1.8; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-inline-end: 5px; }
+  section.card { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 12px; }
+  .cardHead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .badge { background: #eef4ff; color: var(--blue); border-radius: 999px; font-size: 12px; font-weight: 600; padding: 1px 9px; font-variant-numeric: tabular-nums; }
+  .badge:empty { display: none; }
+  .note { font-size: 12px; color: var(--muted); margin: 0 0 8px; line-height: 1.5; }
+  #feedRows { max-height: 280px; overflow-y: auto; }
+  #feedRows .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f2f2f2; font-size: 14px; align-items: center; }
+  #feedRows .row:last-child { border-bottom: none; }
+  #feedRows .t { color: var(--muted); min-width: 44px; font-variant-numeric: tabular-nums; font-size: 13px; }
+  #feedRows .s { flex: 1; }
+  #feedRows .d { font-weight: 600; min-width: 34px; text-align: center; direction: ltr; border-radius: 999px; padding: 1px 8px; font-size: 13px; }
+  #feedRows .d.plus { color: var(--green); background: #e7f4ea; }
+  #feedRows .d.minus { color: var(--red); background: #fdecea; }
+  #feedRows .empty { color: var(--muted); font-size: 14px; padding: 10px 0; text-align: center; }
+  .rangeBtns { display: inline-flex; background: #eef1f5; border-radius: 999px; padding: 3px; gap: 2px; margin: 2px 0 10px; }
+  .rangeBtns button { border: none; background: transparent; padding: 5px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-family: inherit; color: var(--muted); }
+  .rangeBtns button.on { background: var(--blue); color: #fff; font-weight: 600; }
+  #chartWrap { height: 240px; }
+  footer { max-width: 960px; margin: 0 auto; padding: 2px 16px 20px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.7; }
+  footer a { color: var(--blue); text-decoration: none; }
+  #loading { padding: 20px; text-align: center; color: var(--muted); }
+  @media (max-width: 420px) {
+    #stats { gap: 6px; }
+    .stat { padding: 8px 2px; }
+    .stat b { font-size: 17px; }
+    .stat span { font-size: 10.5px; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>JeruFun ירושלים - מוניטור תחנות אופניים</h1>
-  <span class="sub" id="updated"></span>
-  <a id="reportLink" href="/report" style="color:#fff; font-size:13px">דוח עלות ויעילות</a>
+  <div class="hrow">
+    <h1>JeruFun - מוניטור אופניים בירושלים</h1>
+    <a id="reportLink" class="pill" href="/report">דוח עלות ויעילות</a>
+  </div>
+  <div class="hsub"><span class="dot"></span><span id="updated"></span></div>
 </header>
+<main>
 <div id="stats">
-  <div><b id="stTotal">-</b>אופניים זמינים</div>
-  <div><b id="stElec">-</b>חשמליים</div>
-  <div><b id="stEmpty">-</b>תחנות ריקות</div>
-  <div><b id="stActive">-</b>תחנות פעילות</div>
+  <div class="stat blue"><b id="stTotal">-</b><span>אופניים זמינים</span></div>
+  <div class="stat amber"><b id="stElec">-</b><span>חשמליים</span></div>
+  <div class="stat red"><b id="stEmpty">-</b><span>תחנות ריקות</span></div>
+  <div class="stat green"><b id="stActive">-</b><span>תחנות פעילות</span></div>
 </div>
-<div id="map"></div>
-<div id="feed">
-  <h2>נסיעות בשעה האחרונה<span>*</span></h2>
-  <div class="note">* משוערות לפי שינויי מלאי בתחנות, לא נסיעות מתועדות. ייתכן שמדובר בשינוי של המפעיל (פיזור מחדש של אופניים).</div>
+<div class="mapWrap">
+  <div id="map"></div>
+  <div class="legend">
+    <div><i style="background:#43a047"></i>יש אופניים</div>
+    <div><i style="background:#fdd835"></i>מעט (1-2)</div>
+    <div><i style="background:#e53935"></i>תחנה ריקה</div>
+    <div><i style="background:#9e9e9e"></i>מושבתת</div>
+  </div>
+</div>
+<section class="card" id="feed">
+  <div class="cardHead"><h2>נסיעות בשעה האחרונה</h2><span class="badge" id="feedCount"></span></div>
+  <div class="note">משוערות לפי שינויי מלאי בתחנות, לא נסיעות מתועדות. ייתכן שמדובר בשינוי של המפעיל (פיזור מחדש של אופניים).</div>
   <div id="feedRows"></div>
-</div>
-<div id="panel">
-  <h2 id="chartTitle">כלל הרשת - אופניים זמינים לאורך זמן</h2>
+</section>
+<section class="card" id="panel">
+  <div class="cardHead"><h2 id="chartTitle">כלל הרשת - אופניים זמינים לאורך זמן</h2></div>
   <div class="rangeBtns">
     <button data-h="6">6 שעות</button>
     <button data-h="24" class="on">24 שעות</button>
@@ -232,7 +273,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <button data-h="168">שבוע</button>
   </div>
   <div id="chartWrap"><canvas id="chart"></canvas></div>
-</div>
+</section>
+</main>
 <div id="loading" style="display:none">טוען...</div>
 <footer>
   נתונים נאספים כל דקה מה-API הציבורי של JeruFun.
@@ -259,7 +301,7 @@ const STATUS_HE = {Empty: 'תחנה ריקה', Full: 'תחנה מלאה', Disabl
 async function loadStations() {
   const r = await fetch('/api/stations?' + qs());
   const data = await r.json();
-  document.getElementById('updated').textContent = 'עודכן: ' + data.ts;
+  document.getElementById('updated').textContent = 'עודכן: ' + data.ts.slice(11, 16);
   document.getElementById('stTotal').textContent = data.totals.bikes;
   document.getElementById('stElec').textContent = data.totals.electric;
   document.getElementById('stEmpty').textContent = data.totals.empty;
@@ -272,7 +314,7 @@ async function loadStations() {
       markers[s.station_id].setStyle({fillColor: color(b, s.status)});
       markers[s.station_id].setPopupContent(html);
     } else {
-      const m = L.circleMarker([s.lat, s.lng], {radius: 7, color: '#fff', weight: 1, fillColor: color(b, s.status), fillOpacity: .95});
+      const m = L.circleMarker([s.lat, s.lng], {radius: 8, color: '#fff', weight: 1.5, fillColor: color(b, s.status), fillOpacity: .95});
       m.bindPopup(html);
       m.on('click', () => { selected = s.station_id; document.getElementById('chartTitle').textContent = s.name + ' - אופניים זמינים לאורך זמן'; loadChart(); });
       m.addTo(map);
@@ -290,9 +332,12 @@ async function loadChart() {
   if (chart) chart.destroy();
   chart = new Chart(document.getElementById('chart'), {
     type: 'line',
-    data: { labels, datasets: [{ label: 'אופניים זמינים', data: vals, borderColor: '#1a73e8', backgroundColor: 'rgba(26,115,232,.15)', fill: true, pointRadius: 0, tension: .25 }] },
+    data: { labels, datasets: [{ label: 'אופניים זמינים', data: vals, borderColor: '#1a73e8', borderWidth: 2, backgroundColor: 'rgba(26,115,232,.10)', fill: true, pointRadius: 0, pointHitRadius: 12, tension: .3 }] },
     options: { responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
-      scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { beginAtZero: true } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, color: '#98a2b3', font: {size: 10} }, grid: { color: '#f0f2f5' } },
+        y: { beginAtZero: true, ticks: { color: '#98a2b3', font: {size: 10} }, grid: { color: '#f0f2f5' } }
+      },
       plugins: { legend: { display: false } } }
   });
 }
@@ -300,13 +345,14 @@ async function loadChart() {
 async function loadFeed() {
   const r = await fetch('/api/events?hours=1&' + qs());
   const data = await r.json();
+  document.getElementById('feedCount').textContent = data.events.length ? data.events.length : '';
   const el = document.getElementById('feedRows');
   if (!data.events.length) {
     el.innerHTML = '<div class="empty">לא נצפו שינויים בשעה האחרונה</div>';
     return;
   }
   el.innerHTML = data.events.map(e => {
-    const d = e.delta > 0 ? '+' + e.delta : '\u2212' + (-e.delta);
+    const d = e.delta > 0 ? '+' + e.delta : '−' + (-e.delta);
     const cls = e.delta > 0 ? 'plus' : 'minus';
     return '<div class="row"><span class="t">' + e.ts.slice(11, 16) + '</span><span class="s">' + e.station + '</span><span class="d ' + cls + '">' + d + '</span></div>';
   }).join('');
@@ -335,39 +381,43 @@ REPORT_HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JeruFun - דוח עלות ויעילות</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
 <style>
-  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
-  header { background: #1a73e8; color: #fff; padding: 10px 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .sub { font-size: 13px; opacity: .9; }
-  header a { color: #fff; font-size: 13px; }
-  main { max-width: 640px; margin: 0 auto; }
-  .card { background: #fff; margin: 12px; padding: 14px 16px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  body { font-family: "Heebo", -apple-system, "Segoe UI", Arial, sans-serif; margin: 0; background: #f2f4f7; color: #1c2430; }
+  header { background: linear-gradient(135deg, #1a73e8, #1256b0); color: #fff; padding: 12px 16px 10px; }
+  .hrow { display: flex; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; flex: 1; }
+  .pill { background: rgba(255,255,255,.18); color: #fff; font-size: 12.5px; font-weight: 500; padding: 5px 12px; border-radius: 999px; text-decoration: none; white-space: nowrap; }
+  .hsub { max-width: 640px; margin: 6px auto 0; font-size: 12.5px; opacity: .92; }
+  main { max-width: 640px; margin: 0 auto; padding-top: 2px; }
+  .card { background: #fff; margin: 12px; padding: 14px 16px; border-radius: 14px; box-shadow: 0 1px 3px rgba(16,24,40,.08); }
   .verdict { border-right: 4px solid #1a73e8; }
   .verdict .big { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
   .verdict .why { font-size: 14px; color: #444; line-height: 1.5; }
   #stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px; }
-  #stats .stat { flex: 1 1 140px; background: #fff; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.06); padding: 10px 12px; font-size: 13px; color: #555; }
+  #stats .stat { flex: 1 1 140px; background: #fff; border-radius: 14px; box-shadow: 0 1px 3px rgba(16,24,40,.08); padding: 10px 12px; font-size: 13px; color: #555; }
   #stats .stat b { display: block; font-size: 20px; color: #1a73e8; direction: ltr; text-align: right; }
-  h2 { font-size: 15px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
   .rows .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; align-items: baseline; }
   .rows .row:last-child { border-bottom: none; }
   .rows .row .l { flex: 1; color: #444; }
   .rows .row .v { font-weight: 600; text-align: left; white-space: nowrap; }
   .bar { height: 10px; border-radius: 5px; background: #e8f0fe; overflow: hidden; margin: 6px 0 4px; }
   .bar .fill { height: 100%; background: #1a73e8; }
-  .barNote { font-size: 12px; color: #777; margin-bottom: 10px; }
+  .barNote { font-size: 12px; color: #667085; margin-bottom: 10px; }
   ol { margin: 0; padding-right: 20px; font-size: 14px; line-height: 1.6; color: #333; }
   ol li { margin-bottom: 8px; }
-  footer { padding: 10px 16px; font-size: 12px; color: #666; max-width: 640px; margin: 0 auto; }
-  footer a { color: #1a73e8; }
+  footer { padding: 4px 16px 20px; font-size: 12px; color: #667085; max-width: 640px; margin: 0 auto; text-align: center; line-height: 1.7; }
+  footer a { color: #1a73e8; text-decoration: none; }
 </style>
 </head>
 <body>
 <header>
-  <h1>דוח עלות ויעילות - דגימה כל דקה</h1>
-  <span class="sub">נמדד ב-24 באוקטובר 2026</span>
-  <a id="mapLink" href="/dashboard">למפה החיה</a>
+  <div class="hrow">
+    <h1>דוח עלות ויעילות - דגימה כל דקה</h1>
+    <a id="mapLink" class="pill" href="/dashboard">למפה החיה</a>
+  </div>
+  <div class="hsub">נמדד ב-24 באוקטובר 2026</div>
 </header>
 <main>
 <div class="card verdict">
