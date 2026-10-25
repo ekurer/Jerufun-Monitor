@@ -239,9 +239,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <header>
   <div class="hrow">
     <h1>JeruFun - מוניטור אופניים בירושלים</h1>
-    <a id="reportLink" class="pill" href="/report">דוח עלות ויעילות</a>
   </div>
-  <div class="hsub"><span class="dot"></span><span id="updated"></span></div>
+  <div class="hsub"><span class="dot"></span><span id="updated"></span><span style="flex:1"></span><a id="reportLink" class="pill" href="/report">דוח עלות ויעילות</a></div>
 </header>
 <main>
 <div id="stats">
