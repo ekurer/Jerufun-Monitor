@@ -159,13 +159,54 @@ def compute_events(conn, names, ev_hours, now_dt):
             second = naive.replace(tzinfo=ZoneInfo("Asia/Jerusalem"), fold=1)
             if first.utcoffset() == second.utcoffset():
                 epoch = first.timestamp()
-        if epoch is not None and start_epoch <= epoch <= now_epoch and sid in prev:
+        if epoch is not None and epoch <= now_epoch and sid in prev:
             delta = total - prev[sid]
             if delta:
-                events.append(dict(ts=ts, station=names.get(sid, sid), delta=delta, bikes=total))
+                events.append(dict(ts=ts, station=names.get(sid, sid), delta=delta, bikes=total,
+                                   _sid=sid, _epoch=epoch, _win=epoch >= start_epoch))
         prev[sid] = total
+    mark_suspected_unloads(events)
+    events = [e for e in events if e.pop("_win")]
+    for e in events:
+        e.pop("_sid"); e.pop("_epoch")
     events.reverse()
     return events
+
+
+# Suspected operator unloading ("פריקת מפעיל"), marked from OPERATOR_UNLOAD_FROM onward only.
+# Inferred purely from station bike-count changes; no operator log, GPS or bike identity exists.
+# A run = consecutive increases at one station (no decrease in between), each within
+# UNLOAD_MAX_STEP_GAP seconds of the previous, totalling at least UNLOAD_MIN_RISE bikes within
+# UNLOAD_MAX_SPAN seconds. Group returns or availability updates can look the same.
+OPERATOR_UNLOAD_FROM = datetime(2026, 10, 27, 15, 55, tzinfo=ZoneInfo("Asia/Jerusalem")).timestamp()
+UNLOAD_MIN_RISE = 6
+UNLOAD_MAX_SPAN = 600
+UNLOAD_MAX_STEP_GAP = 180
+
+
+def mark_suspected_unloads(events):
+    by_station = {}
+    for e in events:  # chronological
+        if e["_epoch"] >= OPERATOR_UNLOAD_FROM:
+            by_station.setdefault(e["_sid"], []).append(e)
+    for evs in by_station.values():
+        run = []
+        def flush():
+            if run and sum(x["delta"] for x in run) >= UNLOAD_MIN_RISE \
+                    and run[-1]["_epoch"] - run[0]["_epoch"] <= UNLOAD_MAX_SPAN:
+                for x in run:
+                    x["unload"] = True
+            run.clear()
+        for e in evs:
+            if e["delta"] <= 0:
+                flush(); continue
+            if run and (e["_epoch"] - run[-1]["_epoch"] > UNLOAD_MAX_STEP_GAP):
+                flush()
+            run.append(e)
+            # drop leading steps if span too long
+            while run and run[-1]["_epoch"] - run[0]["_epoch"] > UNLOAD_MAX_SPAN:
+                run.pop(0)
+        flush()
 
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -219,6 +260,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   #feedRows .d { font-weight: 600; min-width: 34px; text-align: center; direction: ltr; border-radius: 999px; padding: 1px 8px; font-size: 13px; }
   #feedRows .d.plus { color: var(--green); background: #e7f4ea; }
   #feedRows .d.minus { color: var(--red); background: #fdecea; }
+  #feedRows .unload { margin-inline-start: 8px; background: #fff3e0; color: var(--amber); border-radius: 999px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; }
   #feedRows .empty { color: var(--muted); font-size: 14px; padding: 10px 0; text-align: center; }
   .rangeBtns { display: inline-flex; background: #eef1f5; border-radius: 999px; padding: 3px; gap: 2px; margin: 2px 0 10px; }
   .rangeBtns button { border: none; background: transparent; padding: 5px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-family: inherit; color: var(--muted); }
@@ -260,7 +302,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 <section class="card" id="feed">
   <div class="cardHead"><h2>נסיעות בשעה האחרונה</h2><span class="badge" id="feedCount"></span></div>
-  <div class="note">משוערות לפי שינויי מלאי בתחנות, לא נסיעות מתועדות. ייתכן שמדובר בשינוי של המפעיל (פיזור מחדש של אופניים).</div>
+  <div class="note">משוערות לפי שינויי מלאי בתחנות, לא נסיעות מתועדות. ייתכן שמדובר בשינוי של המפעיל (פיזור מחדש של אופניים).<br>*״פריקת מפעיל״: זיהוי משוער בלבד, לפי עלייה מהירה ורצופה בספירת האופניים בתחנה (6 ומעלה תוך עד 10 דקות). אין אישור מהמפעיל; ייתכן גם החזרה קבוצתית או עדכון זמינות.</div>
   <div id="feedRows"></div>
 </section>
 <section class="card" id="panel">
@@ -352,7 +394,8 @@ async function loadFeed() {
   el.innerHTML = data.events.map(e => {
     const d = e.delta > 0 ? '+' + e.delta : '−' + (-e.delta);
     const cls = e.delta > 0 ? 'plus' : 'minus';
-    return '<div class="row"><span class="t">' + e.ts.slice(11, 16) + '</span><span class="s">' + e.station + '</span><span class="d ' + cls + '">' + d + '</span></div>';
+    const tag = e.unload ? '<span class="unload">פריקת מפעיל*</span>' : '';
+    return '<div class="row"><span class="t">' + e.ts.slice(11, 16) + '</span><span class="s">' + e.station + tag + '</span><span class="d ' + cls + '">' + d + '</span></div>';
   }).join('');
 }
 
