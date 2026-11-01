@@ -425,7 +425,9 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         path = u.path
         q = parse_qs(u.query)
-        authed = (not TOKEN) or (q.get("token", [""])[0] == TOKEN)
+        # Public read-only dashboard and its data APIs; /health and /db stay token-protected.
+        public = path in ("/", "/dashboard", "/api/stations", "/api/events", "/api/history")
+        authed = public or (not TOKEN) or (q.get("token", [""])[0] == TOKEN)
         body, ctype = b"ok", "text/plain"
         if authed:
             if path == "/health":
